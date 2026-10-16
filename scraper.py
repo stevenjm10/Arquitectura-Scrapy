@@ -217,6 +217,7 @@ def should_retry(row, incomplete=False):
 
 def capture_post(page, url, output):
     """Capture visible post media, including the displayed frame of a video."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     media = output / 'media'
     media.mkdir(parents=True, exist_ok=True)
     shortcode = urlsplit(url).path.strip('/').split('/')[-1]
@@ -228,12 +229,15 @@ def capture_post(page, url, output):
         candidate = candidates.nth(index)
         box = candidate.bounding_box()
         if box and box['width'] >= 200 and box['height'] >= 150:
-            candidate.scroll_into_view_if_needed()
-            page.wait_for_function('''element => element.tagName === 'IMG'
-                ? element.complete && element.naturalWidth > 0
-                : element.readyState >= 2''', arg=candidate.element_handle(), timeout=8000)
-            candidate.screenshot(path=str(destination), type='jpeg', quality=80, timeout=10000)
-            return f'media/{destination.name}'
+            try:
+                candidate.scroll_into_view_if_needed()
+                page.wait_for_function('''element => element.tagName === 'IMG'
+                    ? element.complete && element.naturalWidth > 0
+                    : element.readyState >= 2''', arg=candidate.element_handle(), timeout=8000)
+                candidate.screenshot(path=str(destination), type='jpeg', quality=80, timeout=10000)
+                return f'media/{destination.name}'
+            except PlaywrightTimeoutError:
+                continue
     # Keep a viewport capture if the current layout has no separate media element.
     page.screenshot(path=str(destination), type='jpeg', quality=80, full_page=False, timeout=10000)
     return f'media/{destination.name}'
