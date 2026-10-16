@@ -1,25 +1,13 @@
 # scrapy instagram
 
-I use scrapy instagram to collect Instagram profile information and explore it in a local dashboard. The scraper uses Python and Playwright to read the rendered page, while the dashboard presents the exported data in a more organized way.
+I use this project to collect Instagram profile information and view it in a local dashboard. The scraper runs with Python and Playwright, and the dashboard shows publications, screenshots, followers, and following accounts.
 
-My main extraction setup collects up to **50 posts, 100 followers, and 100 following accounts**. These are collection limits, so the final number can be lower if Instagram stops loading records or the page layout does not match the selectors.
+The project has two application files:
 
-## What the project includes
+- `scraper.py`: collects the data, captures visible post media, and saves the results.
+- `dashboard.py`: contains the dashboard layout and generates `dashboard.html`.
 
-- Profile biography and visible follower/following counters.
-- Post links, captions, and dates when they can be detected.
-- Deduplicated follower and following profile candidates.
-- JSON and CSV exports, saved throughout the extraction.
-- A local dashboard with colored summary cards, search, sorting, pagination, and a run selector.
-- Resume support and an option to retry posts with missing captions or dates.
-
-The dashboard interface is in Spanish. The source code, command-line options, comments, and new export field names are in English. Historical exports remain readable through a compatibility module.
-
-## Requirements
-
-- Python 3.11 or later.
-- Playwright and its Chromium browser.
-- An Instagram session, signed in manually through the browser when needed.
+The source code and commands are in English. The dashboard interface is in Spanish.
 
 ## Installation
 
@@ -31,136 +19,88 @@ py -m venv .venv_nuevo
 .\.venv_nuevo\Scripts\python.exe -m playwright install chromium
 ```
 
-If `.venv_nuevo` already works, I skip creating it again. On Linux or macOS, I use `python3 -m venv .venv` and replace the Windows Python path with `.venv/bin/python`.
+If the environment already works, I skip creating it again.
 
-## Running the scraper
+## Collecting data
 
-This is the command I use for the Rubius profile:
+To collect up to 50 posts, 100 followers, and 100 following accounts:
 
 ```powershell
 .\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --relationship-limit 100
 ```
 
-The browser opens and waits up to 180 seconds for an active session. If Instagram asks me to sign in, I do that in the browser. I do not need to press Enter in the terminal. I keep the terminal and browser open until the extraction finishes.
+The browser opens and waits for my Instagram session. If needed, I sign in through the browser without pressing Enter in the terminal. I leave the terminal and browser open while the program runs.
 
-The scraper saves its progress and generates `dashboard.html` when it finishes or handles an interruption. I can stop it with Ctrl+C and resume later. A detected authentication challenge or restriction stops extraction instead of triggering automatic retries.
+Each post is saved with its link, caption and date when available, and a JPEG screenshot. For videos and reels, the screenshot captures the visible frame; it does not download the video file. If the media cannot be captured separately, the scraper saves the visible browser area instead.
+
+The screenshots come from what the browser renders. They are not downloads of the original-resolution media.
 
 ## Opening the dashboard
 
-I open `dashboard.html` in my browser:
+The scraper generates `dashboard.html` automatically. I open it with:
 
 ```powershell
 Start-Process .\dashboard.html
 ```
 
-To rebuild it from existing exports without opening Instagram:
+To rebuild it from existing results:
 
 ```powershell
 py dashboard.py
 ```
 
-The dashboard reads both the current `results/` folder and the historical `resultados/` folder. I can choose an extraction from the selector or import an export with the JSON file button. After rebuilding the page, I reload the browser to see the latest data.
+The dashboard includes profile information, screenshot cards, search, sorting, pagination, and separate follower and following lists. I reload the page after rebuilding it.
 
-The generated HTML works offline and does not require a web server. It contains a copy of the exported data, so sharing the HTML also shares that data.
+Screenshots are embedded in the generated HTML, so it can be opened without a server or internet connection. Sharing that HTML also shares its data and screenshots.
 
-## Resuming an extraction
+## Continuing a saved run
 
-For a new-format export, I use:
-
-```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --resume results\RUN_FOLDER\data.json
-```
-
-I can also resume the historical export used in this project:
+To continue an extraction and capture posts that do not have screenshots yet:
 
 ```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --relationships-only --relationship-limit 100 --resume resultados\20261015_235333_249974\datos.json
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --posts-only --resume results\RUN_FOLDER\data.json
 ```
 
-This second command skips the posts and repeats only the follower and following lists. It preserves the existing posts. Relationship lists are collected again from the beginning; the scraper does not restore the previous scroll position.
-
-When resuming a historical export, the scraper writes `data.json` and the English-named CSV files into the same run folder. It leaves the original Spanish-named files unchanged. I use `data.json` for subsequent resumes because it contains the latest progress, and the dashboard prefers it automatically.
-
-To retry posts with missing captions or dates:
+For the existing local extraction in this project, I use:
 
 ```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --retry-incomplete --posts-only --resume resultados\20261015_235333_249974\data.json
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --posts-only --resume resultados\20261015_235333_249974\data.json
 ```
 
-Previously recovered fields are kept if the new attempt cannot obtain them. Error history is also kept when resuming, so an earlier `KeyboardInterrupt` entry does not necessarily describe the latest attempt.
+I use the current `data.json` file for resuming. Previous Spanish-named exports remain on disk, but the simplified application reads the current English field names. Existing local runs were converted before removing the compatibility module.
 
-## Command-line options
+## Useful options
 
 | Option | Purpose |
 | --- | --- |
-| `--username` | Required target username, with or without `@`. |
-| `--limit` | Post limit from 1 to 50; defaults to 50. |
-| `--relationship-limit` | Limit per relationship list from 1 to 100; defaults to 100. |
-| `--posts-only` | Skip both relationship lists. |
-| `--skip-relationships` | Alias for `--posts-only`. |
-| `--relationships-only` | Skip post collection. |
-| `--retry-incomplete` | Re-read saved posts with a missing caption or date. |
-| `--resume` | Path to a current or historical JSON export. |
-| `--manual-bio` | Select the biography by clicking its text in the browser. |
-| `--output` | Run directory root; defaults to `results/` for new extractions. |
+| `--username` | Instagram username. |
+| `--limit` | Post limit, from 1 to 50. |
+| `--relationship-limit` | Limit per follower/following list, from 1 to 100. |
+| `--posts-only` | Collect posts without repeating relationship lists. |
+| `--relationships-only` | Collect relationship lists without opening posts. |
+| `--retry-incomplete` | Retry posts with missing captions or dates. |
+| `--resume` | Continue from a saved `data.json`. |
+| `--no-screenshots` | Collect text data without capturing post images. |
+| `--manual-bio` | Select the profile biography with a click. |
+| `--output` | Choose the directory for new extraction runs. |
 
-For a custom dashboard source or destination:
+## Saved files
 
-```powershell
-py dashboard.py --results my_results --output my_dashboard.html
+New runs are stored in `results/RUN_TIMESTAMP/`:
+
+```text
+data.json
+posts.csv
+followers.csv
+following.csv
+media/
+    POST_CODE.jpg
 ```
 
-The previous Spanish command-line options have been replaced by the English options above.
+The dashboard also reads current-format exports in the existing `resultados/` folder. The `media/` folder is needed when rebuilding the dashboard from saved data. Importing a raw `data.json` alone does not import separate image files; rebuilding with `dashboard.py` includes the available screenshots.
 
-## Output files
+I keep extracted data, screenshots, virtual environments, generated HTML, and browser sessions out of GitHub. New browser sessions use `.instagram_session/`; the existing `.sesion_instagram/` is reused when present. These session folders stay private because they can provide account access.
 
-New runs are stored under `results/RUN_TIMESTAMP/`:
+## Collection limits
 
-| File | Contents |
-| --- | --- |
-| `data.json` | Profile, posts, relationships, statuses, errors, and extraction summary. |
-| `posts.csv` | Post URL, caption, date, extraction status, and method. |
-| `followers.csv` | Collected follower profile candidates. |
-| `following.csv` | Collected following profile candidates. |
-
-JSON preserves original text. CSV cells that could be interpreted as spreadsheet formulas receive a protective prefix. JSON is saved through a temporary file replacement.
-
-## How I organized the code
-
-| File | Responsibility |
-| --- | --- |
-| `scraper.py` | Browser navigation, extraction, progress saving, and command-line options. |
-| `dashboard.py` | Loading exports and generating the local HTML dashboard. |
-| `dashboard.template.html` | Dashboard layout, styling, and browser interactions. |
-| `legacy_data.py` | Converting historical field and status names in memory. |
-| `test_local.py` | Local checks for URL handling, exports, compatibility, retries, and cleanup. |
-
-I open **`dashboard.html`**, rather than the template, to view the generated results. The template is the source used to build that page.
-
-## Data quality and limitations
-
-I treat the results as a partial extraction rather than a complete copy of an Instagram account:
-
-- The post limit follows the profile grid, which may include pinned posts. It does not guarantee the 50 most recent posts.
-- Captions are read from the rendered page or an author-attributed quotation in page metadata. Missing text means it was not detected; it does not prove that the post has no caption. Extracted text may be truncated.
-- Dates are read from DOM time elements or publication metadata when available.
-- Biographies can be incomplete or include extra profile text, especially with manual selection.
-- Exact counters are saved only when the scraper finds a numeric `title` attribute. Abbreviated visible counts are not converted into exact totals.
-- Relationship candidates come from profile links inside the dialog. Suggestions may be mixed in, and scrolling may stop before the requested limit.
-- Quality bars show whether fields were detected, not whether their contents are accurate. An empty error list does not guarantee a complete extraction.
-- Photos, videos, stories, likes, and engagement metrics are not collected.
-
-Earlier runs recovered 50 posts, 50 follower candidates, and 100 following candidates. Caption detection remained incomplete. Local tests check program behavior, but live selector changes still need validation against Instagram.
-
-## Session storage
-
-New sessions use `.instagram_session/`. If the existing `.sesion_instagram/` folder is present, the scraper reuses it to preserve the current login.
-
-I keep these folders private because they can contain credentials that provide account access. Passwords are not requested or printed in the terminal. To remove a session, I close the scraper and browser first, then delete its session folder.
-
-## Local checks
-
-```powershell
-py -m unittest test_local -v
-py -m py_compile scraper.py dashboard.py legacy_data.py
-```
+The scraper follows the profile grid, which may contain pinned posts, so the first 50 links are not guaranteed to be the 50 most recent posts. The dashboard can sort the dates that were recovered. Captions, dates, and relationship lists may be incomplete, and suggested profiles can appear among relationship candidates. The configured limits are maximum targets rather than guaranteed totals.

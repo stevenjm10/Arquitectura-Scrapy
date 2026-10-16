@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from dashboard import generate_dashboard
-from legacy_data import normalize_data
 BASE = Path(__file__).resolve().parent
 RESERVED_PATHS = {'accounts', 'explore', 'direct', 'reels', 'reel', 'p', 'stories',
               'about', 'legal', 'privacy', 'terms', 'challenge', 'settings'}
@@ -216,7 +215,31 @@ def should_retry(row, incomplete=False):
             (incomplete and (not row.get('caption') or not row.get('date'))))
 
 
-def extract_post(page, url, username=None):
+def capture_post(page, url, output):
+    """Capture visible post media, including the displayed frame of a video."""
+    media = output / 'media'
+    media.mkdir(parents=True, exist_ok=True)
+    shortcode = urlsplit(url).path.strip('/').split('/')[-1]
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', shortcode):
+        raise ValueError('Invalid post shortcode for screenshot filename.')
+    destination = media / f'{shortcode}.jpg'
+    candidates = page.locator('article video, article img, main video, main img')
+    for index in range(min(candidates.count(), 20)):
+        candidate = candidates.nth(index)
+        box = candidate.bounding_box()
+        if box and box['width'] >= 200 and box['height'] >= 150:
+            candidate.scroll_into_view_if_needed()
+            page.wait_for_function('''element => element.tagName === 'IMG'
+                ? element.complete && element.naturalWidth > 0
+                : element.readyState >= 2''', arg=candidate.element_handle(), timeout=8000)
+            candidate.screenshot(path=str(destination), type='jpeg', quality=80, timeout=10000)
+            return f'media/{destination.name}'
+    # Keep a viewport capture if the current layout has no separate media element.
+    page.screenshot(path=str(destination), type='jpeg', quality=80, full_page=False, timeout=10000)
+    return f'media/{destination.name}'
+
+
+def extract_post(page, url, username=None, output=None):
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     open_page(page, url)
     # Navigation may finish before the post is rendered.
@@ -252,7 +275,17 @@ def extract_post(page, url, username=None):
                     continue
                 extracted_date = value
                 break
-    return {'url': url, 'caption': caption, 'date': extracted_date,
+    screenshot = None
+    if output is not None:
+        try:
+            check_access(page)
+            screenshot = capture_post(page, url, output)
+        except InstagramRestriction:
+            raise
+        except Exception as exc:
+            check_access(page)
+            print(f'Could not capture {url}: {exc}')
+    return {'url': url, 'caption': caption, 'date': extracted_date, 'screenshot': screenshot,
             'status': 'extracted_check_truncation' if caption else 'caption_not_detected',
             'method': method + '; date from DOM time or publication metadata'}
 
@@ -323,7 +356,7 @@ def save_results(data, output):
     temporary = output / 'data.tmp'
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(output / 'data.json')
-    tables = [('posts', ['url', 'caption', 'date', 'status', 'method']),
+    tables = [('posts', ['url', 'caption', 'date', 'screenshot', 'status', 'method']),
               ('followers', ['username', 'url']), ('following', ['username', 'url'])]
     for name, fields in tables:
         with (output / f'{name}.csv').open('w', newline='', encoding='utf-8-sig') as f:
@@ -363,6 +396,7 @@ def main():
     parser.add_argument('--relationships-only', dest='relationships_only', action='store_true', help='Skip posts; combine with --resume to preserve existing posts.')
     parser.add_argument('--retry-incomplete', action='store_true', help='On resume, retry posts with a missing caption or date.')
     parser.add_argument('--manual-bio', action='store_true', help='Select the biography with one click.')
+    parser.add_argument('--no-screenshots', action='store_true', help='Skip post screenshots.')
     parser.add_argument('--limit', type=int, default=50)
     parser.add_argument('--relationship-limit', type=int, default=100,
                         help='Maximum records per relationship list (1–100).')
@@ -380,7 +414,7 @@ def main():
              'following': [], 'statuses': {}, 'errors': []}
     if args.resume:
         try:
-            previous = normalize_data(json.loads(args.resume.read_text(encoding='utf-8')))
+            previous = json.loads(args.resume.read_text(encoding='utf-8'))
             if previous.get('profile', {}).get('username', '').lower() != username.lower():
                 parser.error('The username does not match the run being resumed.')
             for field in ('posts', 'followers', 'following'):
@@ -419,11 +453,13 @@ def main():
             data['statuses']['post_links'] = status
             for i, url in enumerate(links, 1):
                 previous_post = next((f for f in data['posts'] if f.get('url') == url), None)
-                if previous_post and not should_retry(previous_post, args.retry_incomplete):
+                has_screenshot = (previous_post and previous_post.get('screenshot') and
+                                  (output / previous_post['screenshot']).is_file())
+                if previous_post and not should_retry(previous_post, args.retry_incomplete) and (args.no_screenshots or has_screenshot):
                     continue
                 print(f'Post {i}/{len(links)}: {url}')
                 try:
-                    row = extract_post(page, url, username)
+                    row = extract_post(page, url, username, None if args.no_screenshots else output)
                 except InstagramRestriction:
                     raise
                 except Exception as exc:
@@ -432,7 +468,7 @@ def main():
                     data['errors'].append(f'{url}: {type(exc).__name__}: {exc}')
                 # Preserve previously recovered fields if a new attempt fails.
                 if previous_post:
-                    for field in ('caption', 'date'):
+                    for field in ('caption', 'date', 'screenshot'):
                         if not row.get(field) and previous_post.get(field):
                             row[field] = previous_post[field]
                             row['method'] += f'; {field} preserved from the previous extraction'
