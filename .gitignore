@@ -1,0 +1,10 @@
+.venv/
+.sesion_instagram/
+resultados/
+__pycache__/
+
+dashboard.html
+
+results/
+.instagram_session/
+.venv_nuevo/
