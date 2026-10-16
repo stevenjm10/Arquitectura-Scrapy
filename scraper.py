@@ -13,7 +13,6 @@ RESERVED_PATHS = {'accounts', 'explore', 'direct', 'reels', 'reel', 'p', 'storie
 
 class InstagramRestriction(RuntimeError):
     """Stop extraction when Instagram reports a restriction."""
-
 def username_from_url(url):
     parts = urlsplit(url)
     name = parts.path.strip('/')
@@ -202,7 +201,7 @@ def caption_from_metadata(content, username):
     """Extract only the final quotation attributed to the requested author."""
     if not content or not username:
         return None
-    match = re.fullmatch(r'(.*?):\s*["“](.*)["”]\s*', content, re.S)
+    match = re.fullmatch(r'(.*?):\s*["“](.*)["”][.\s]*', content, re.S)
     if not match:
         return None
     if not re.search(r'(?<![\w.])' + re.escape(username) + r'(?![\w.])', match[1], re.I):
@@ -213,6 +212,71 @@ def caption_from_metadata(content, username):
 def should_retry(row, incomplete=False):
     return (row.get('status') == 'error' or
             (incomplete and (not row.get('caption') or not row.get('date'))))
+
+
+def structured_post(page, url):
+    """Read post-specific public structured metadata, excluding related posts."""
+    matches = []
+    def visit(value):
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            references = [value.get('url'), value.get('@id'), value.get('mainEntityOfPage')]
+            references = [ref.get('@id') or ref.get('url') if isinstance(ref, dict) else ref
+                          for ref in references]
+            if any(isinstance(ref, str) and normalize_post_url(ref) == url for ref in references):
+                matches.append(value)
+            for key in ('@graph', 'mainEntity'):
+                visit(value.get(key))
+    for raw in page.locator('script[type="application/ld+json"]').all_text_contents():
+        try:
+            visit(json.loads(raw))
+        except (ValueError, TypeError):
+            continue
+    return next((item for item in matches if item.get('articleBody') or item.get('caption')
+                 or item.get('description')), {})
+
+
+def download_post_image(page, url, output):
+    """Save the post's displayed CDN image; never fetch unrelated page URLs."""
+    candidates = page.locator('article img, main img').evaluate_all('''elements => elements
+        .filter(e => e.getClientRects().length && e.naturalWidth >= 300 && e.clientHeight >= 150)
+        .map(e => e.currentSrc || e.src)''')
+    meta = page.locator('meta[property="og:image"]').first
+    if meta.count():
+        candidates.insert(0, meta.get_attribute('content'))
+    shortcode = urlsplit(url).path.strip('/').split('/')[-1]
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', shortcode):
+        return None
+    for source in dict.fromkeys(candidates):
+        if not isinstance(source, str):
+            continue
+        parsed = urlsplit(source)
+        host = parsed.hostname or ''
+        if parsed.scheme != 'https' or not any(host.endswith('.' + domain) or host == domain
+                                               for domain in ('cdninstagram.com', 'fbcdn.net')):
+            continue
+        response = None
+        try:
+            response = page.context.request.get(source, timeout=15000, max_redirects=0)
+            mime = response.headers.get('content-type', '').split(';')[0].strip()
+            extension = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp'}.get(mime)
+            if not response.ok or not extension:
+                continue
+            content = response.body()
+            if not content or len(content) > 20 * 1024 * 1024:
+                continue
+            destination = output / 'media' / (shortcode + '_image' + extension)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+            return destination.relative_to(output).as_posix()
+        except Exception:
+            continue
+        finally:
+            if response is not None:
+                response.dispose()
+    return None
 
 
 def capture_post(page, url, output):
@@ -259,6 +323,11 @@ def extract_post(page, url, username=None, output=None):
     date = main_content.locator('time[datetime]')
     caption = get_text(caption_element) if caption_element.count() else None
     method = 'DOM article/main h1' if caption else 'caption_not_detected'
+    structured = structured_post(page, url)
+    if not caption:
+        value = structured.get('articleBody') or structured.get('caption') or structured.get('description')
+        if isinstance(value, str) and value.strip():
+            caption, method = value.strip(), 'post JSON-LD'
     if not caption:
         for selector in ('meta[property="og:description"]', 'meta[name="description"]'):
             meta = page.locator(selector).first
@@ -268,6 +337,12 @@ def extract_post(page, url, username=None, output=None):
                 method = selector + '; quotation attributed to the username; check for truncation'
                 break
     extracted_date = date.first.get_attribute('datetime') if date.count() else None
+    if not extracted_date and isinstance(structured.get('datePublished'), str):
+        try:
+            datetime.fromisoformat(structured['datePublished'].replace('Z', '+00:00'))
+            extracted_date = structured['datePublished']
+        except ValueError:
+            pass
     if not extracted_date:
         for selector in ('meta[property="article:published_time"]', 'meta[property="og:published_time"]'):
             meta = page.locator(selector).first
@@ -280,16 +355,20 @@ def extract_post(page, url, username=None, output=None):
                 extracted_date = value
                 break
     screenshot = None
+    media_kind = None
     if output is not None:
         try:
             check_access(page)
-            screenshot = capture_post(page, url, output)
+            screenshot = download_post_image(page, url, output)
+            media_kind = 'downloaded_image' if screenshot else 'screenshot'
+            if not screenshot:
+                screenshot = capture_post(page, url, output)
         except InstagramRestriction:
             raise
         except Exception as exc:
             check_access(page)
             print(f'Could not capture {url}: {exc}')
-    return {'url': url, 'caption': caption, 'date': extracted_date, 'screenshot': screenshot,
+    return {'url': url, 'caption': caption, 'date': extracted_date, 'screenshot': screenshot, 'media_kind': media_kind,
             'status': 'extracted_check_truncation' if caption else 'caption_not_detected',
             'method': method + '; date from DOM time or publication metadata'}
 
@@ -360,7 +439,7 @@ def save_results(data, output):
     temporary = output / 'data.tmp'
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(output / 'data.json')
-    tables = [('posts', ['url', 'caption', 'date', 'screenshot', 'status', 'method']),
+    tables = [('posts', ['url', 'caption', 'date', 'screenshot', 'media_kind', 'status', 'method']),
               ('followers', ['username', 'url']), ('following', ['username', 'url'])]
     for name, fields in tables:
         with (output / f'{name}.csv').open('w', newline='', encoding='utf-8-sig') as f:
@@ -472,7 +551,7 @@ def main():
                     data['errors'].append(f'{url}: {type(exc).__name__}: {exc}')
                 # Preserve previously recovered fields if a new attempt fails.
                 if previous_post:
-                    for field in ('caption', 'date', 'screenshot'):
+                    for field in ('caption', 'date', 'screenshot', 'media_kind'):
                         if not row.get(field) and previous_post.get(field):
                             row[field] = previous_post[field]
                             row['method'] += f'; {field} preserved from the previous extraction'

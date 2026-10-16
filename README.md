@@ -31,9 +31,9 @@ To collect up to 50 posts, 100 followers, and 100 following accounts:
 
 The browser opens and waits for my Instagram session. If needed, I sign in through the browser without pressing Enter in the terminal. I leave the terminal and browser open while the program runs.
 
-Each post is saved with its link, caption and date when available, and a JPEG screenshot. For videos and reels, the screenshot captures the visible frame; it does not download the video file. If the media cannot be captured separately, the scraper saves the visible browser area instead.
+Each post is saved with its link, caption and date when available. I download the image served by Instagram when available, and fall back to a JPEG screenshot if downloading fails. The delivered image may be resized by Instagram. For videos and reels, I save a cover image or visible frame; the video file itself is not downloaded. Carousel posts currently show one image.
 
-The screenshots come from what the browser renders. They are not downloads of the original-resolution media.
+The gallery shows large image previews, captions, an image download button, and a link to Instagram. Missing captions and images remain empty until a new extraction recovers them. I can use `--retry-incomplete` with `--resume` to revisit posts with missing captions or dates.
 
 ## Opening the dashboard
 

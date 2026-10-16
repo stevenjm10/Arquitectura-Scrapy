@@ -16,9 +16,12 @@ TEMPLATE = r"""<!doctype html>
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .collection-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:28px 0}.collection-counts div{border-radius:13px;padding:18px 12px;background:#f0e9fb;text-align:center}.collection-counts div:nth-child(2){background:#dff5ef}.collection-counts div:nth-child(3){background:#ffede3}.collection-counts strong{display:block;font-size:26px;color:#54416c}.collection-counts span{font-size:11px;color:#736282}.post{padding:0;overflow:hidden;min-height:340px}.post>p,.post>span:first-child{margin-left:18px;margin-right:18px}.post>span:first-child{margin-top:18px;order:0}.post .preview{display:block;order:-1;background:#eae2f4;height:230px;flex-shrink:0;overflow:hidden}.preview img{display:block;width:100%;height:100%;object-fit:contain;background:#1f172b}.preview-empty{order:-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:210px;background:linear-gradient(135deg,#eee3ff,#fce6e2);color:#9b7bad;font-size:11px}.preview-empty span{font-size:43px;color:#b79acc}.post>p:last-child{padding-bottom:17px}.post p{margin-top:9px;margin-bottom:9px}.post:hover{transform:translateY(-3px)}
+
+/* Media gallery using the original light palette. */
+.post .preview{height:auto;aspect-ratio:4/5}.preview img{object-fit:contain;background:#f1edf7}.post>.card-actions{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:auto}.post>span.muted{background:#f1e8ff;color:#8456be;border-radius:5px;padding:6px 9px;margin:14px 18px 0;align-self:flex-start;font-size:10px}.preview-empty{aspect-ratio:4/5;height:auto}button:disabled{opacity:.45}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #9872e2;outline-offset:3px}
 </style></head><body><header><div class="topline"><div class="brand"><span class="brandmark" aria-hidden="true">◎</span>scrapy instagram<span style="color:#a987d3;font-weight:400">.</span></div><span class="local">Espacio local</span></div><div class="hero"><div><span class="eyebrow">INSTAGRAM · OBSERVATORIO</span><h1>Una nueva mirada<br>a <em>tus datos.</em></h1></div><div class="hero-art" aria-hidden="true"><div class="orbit"></div><div class="orbit"></div><div class="orbit-core">◎</div><div class="satellite"></div><div class="satellite"></div></div></div></header><main>
 <div class="toolbar runbar"><label for="run">Extracción</label><select id="run"></select><button id="load">Abrir JSON</button><input id="file" type="file" accept=".json,application/json" hidden><a id="download" class="download">Descargar JSON</a></div>
-<div id="notice" role="status"></div><section id="metrics" class="metrics"></section><div class="columns"><section class="panel profile-panel"><div class="avatar" id="avatar" aria-hidden="true">@</div><h2 id="profile">Perfil</h2><p class="bio" id="bio"></p><a id="profilelink" target="_blank" rel="noopener noreferrer">Ver en Instagram ↗</a></section><section class="panel collection-panel"><p class="section-kicker">TU COLECCIÓN</p><h2>Publicaciones, en imágenes.</h2><p class="muted">Explora las capturas guardadas y abre cada publicación en Instagram.</p><div id="collection" class="collection-counts"></div><p class="muted">Los reels se muestran con una captura del fotograma visible.</p></section></div>
+<div id="notice" role="status"></div><section id="metrics" class="metrics"></section><div class="columns"><section class="panel profile-panel"><div class="avatar" id="avatar" aria-hidden="true">@</div><h2 id="profile">Perfil</h2><p class="bio" id="bio"></p><a id="profilelink" target="_blank" rel="noopener noreferrer">Ver en Instagram ↗</a></section><section class="panel collection-panel"><p class="section-kicker">TU COLECCIÓN</p><h2>Publicaciones, en imágenes.</h2><p class="muted">Fotos, descripciones y enlaces de tus publicaciones, reunidos en una galería.</p><div id="collection" class="collection-counts"></div><p class="muted">Los reels muestran una portada o un fotograma. Abre Instagram para reproducirlos.</p></section></div>
 <div class="explore-heading"><h2>Explora tu extracción</h2><span>Publicaciones y conexiones</span></div><div class="tabs" role="tablist" aria-label="Datos"><button role="tab" data-tab="posts">Publicaciones</button><button role="tab" data-tab="followers">Seguidores</button><button role="tab" data-tab="following">Seguidos</button></div><div class="toolbar"><input id="search" type="search" aria-label="Buscar en los datos" placeholder="Buscar descripción o usuario…"><select id="sort" aria-label="Orden"><option value="original">Orden de extracción</option><option value="recent">Más recientes / A–Z</option></select><span id="count" class="muted"></span></div><section id="content" style="margin-top:18px"></section><div class="pagination"><button id="prev">Anterior</button><span id="page"></span><button id="next">Siguiente</button></div><footer>scrapy instagram · Colección local de publicaciones y conexiones. Las listas pueden ser parciales.</footer></main>
 <script>
 'use strict';
@@ -31,7 +34,7 @@ function link(url,label){const element=node('a',label);const safe=safeURL(url);i
 function rows(key){return Array.isArray(data[key])?data[key].filter(item=>item&&typeof item==='object'):[];}
 function formatDate(value){const date=new Date(value);return value&&!isNaN(date)?date.toLocaleDateString('es'):'Fecha no disponible';}
 function metric(label,value,note){const element=node('div',undefined,'metric');element.append(node('span',label,'muted'),node('strong',typeof value==='number'?new Intl.NumberFormat('es-EC').format(value):String(value)),node('span',note,'muted'));$('metrics').append(element);}
-function previewURL(value){return typeof value==='string'&&/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(value)?value:null;}
+function previewURL(value){return typeof value==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value)?value:null;}
 function selectRun(){
  data=runs[$('run').value]?.data||{};page=0;
  const profile=data.profile||{},posts=rows('posts'),captured=posts.filter(post=>previewURL(post.preview)).length;
@@ -39,13 +42,13 @@ function selectRun(){
  metric('Publicaciones',posts.length,'En tu colección');
  metric('Seguidores del perfil',profile.followers_total??profile.followers_visible??'Sin dato',`${rows('followers').length} perfiles guardados`);
  metric('Seguidos del perfil',profile.following_total??profile.following_visible??'Sin dato',`${rows('following').length} perfiles guardados`);
- metric('Capturas',captured,formatDate(data.resumed_utc||data.extracted_utc));
+ metric('Imágenes guardadas',captured,formatDate(data.resumed_utc||data.extracted_utc));
  $('profile').textContent=profile.username?'@'+profile.username:'Sin perfil';
  $('avatar').textContent=(profile.username||'@').slice(0,1).toUpperCase();
  $('bio').textContent=profile.bio||'Biografía no disponible.';
  $('profilelink').removeAttribute('href');const url=safeURL(profile.url);if(url)$('profilelink').href=url;
  $('collection').replaceChildren();
- for(const [value,label] of [[posts.length,'Publicaciones'],[captured,'Capturas'],[posts.filter(post=>post.url?.includes('/reel/')).length,'Reels']]){const element=node('div');element.append(node('strong',String(value)),node('span',label));$('collection').append(element);}
+ for(const [value,label] of [[posts.length,'Publicaciones'],[captured,'Imágenes'],[posts.filter(post=>post.url?.includes('/reel/')).length,'Reels']]){const element=node('div');element.append(node('strong',String(value)),node('span',label));$('collection').append(element);}
  $('notice').textContent=runs.length?'Tu colección de publicaciones y conexiones. Las listas pueden ser parciales.':'Abre un archivo data.json para explorar tu colección.';
  if(downloadUrl)URL.revokeObjectURL(downloadUrl);downloadUrl=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));$('download').href=downloadUrl;$('download').download='data.json';render();
 }
@@ -62,10 +65,10 @@ function render(){
   const grid=node('div',undefined,'posts');
   for(const post of visible){
    const card=node('article',undefined,'post'),imageURL=previewURL(post.preview);
-   if(imageURL){const anchor=link(post.url);anchor.className='preview';const image=node('img');image.src=imageURL;image.alt='Captura de la publicación';image.loading='lazy';anchor.append(image);card.append(anchor);}
-   else{const placeholder=node('div',undefined,'preview-empty');placeholder.append(node('span','◎'),node('small','Captura pendiente'));card.append(placeholder);}
+   if(imageURL){const anchor=link(post.url);anchor.className='preview';const image=node('img');image.src=imageURL;image.alt=post.caption?'Imagen de la publicación: '+post.caption.slice(0,120):'Imagen de la publicación';image.loading='lazy';anchor.append(image);card.append(anchor);}
+   else{const placeholder=node('div',undefined,'preview-empty');placeholder.append(node('span','◎'),node('small','Imagen pendiente de extracción'));card.append(placeholder);}
    card.append(node('span',post.url?.includes('/reel/')?'REEL':'PUBLICACIÓN','muted'),node('p',post.caption||'Sin descripción disponible.'),node('p',formatDate(post.date),'muted'));
-   const action=node('p');action.append(link(post.url,'Abrir publicación ↗'));card.append(action);grid.append(card);
+   const action=node('p',undefined,'card-actions');if(imageURL){const save=node('a','Descargar imagen');save.href=imageURL;save.download=(post.url?.split('/').filter(Boolean).pop()||'publication')+'.'+(imageURL.startsWith('data:image/png')?'png':imageURL.startsWith('data:image/webp')?'webp':'jpg');action.append(save);}action.append(link(post.url,'Instagram ↗'));card.append(action);grid.append(card);
   }root.append(grid);
  }else{
   const wrap=node('div',undefined,'tablewrap'),table=node('table'),head=node('thead'),heading=node('tr');heading.append(node('th','Usuario'),node('th','Perfil'));head.append(heading);table.append(head);
@@ -97,8 +100,8 @@ def generate_dashboard(results=None, output=BASE / 'dashboard.html'):
                     post.pop('preview', None)
                     if post.get('screenshot'):
                         image = (file.parent / post['screenshot']).resolve()
-                        if image.is_relative_to(file.parent.resolve()) and image.suffix.lower() in {'.jpg', '.jpeg', '.png'} and image.is_file():
-                            mime = 'png' if image.suffix.lower() == '.png' else 'jpeg'
+                        if image.is_relative_to(file.parent.resolve()) and image.suffix.lower() in {'.jpg', '.jpeg', '.png', '.webp'} and image.is_file():
+                            mime = {'.png': 'png', '.webp': 'webp'}.get(image.suffix.lower(), 'jpeg')
                             post['preview'] = f'data:image/{mime};base64,' + base64.b64encode(image.read_bytes()).decode('ascii')
                 runs.append({'name': file.parent.name, 'data': data})
             except (OSError, ValueError, TypeError):
