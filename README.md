@@ -29,6 +29,12 @@ To collect up to 50 posts, 100 followers, and 100 following accounts:
 .\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --relationship-limit 100
 ```
 
+For a smaller extraction of 25 posts, I use:
+
+```powershell
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 25 --relationship-limit 100
+```
+
 The browser opens and waits for my Instagram session. If needed, I sign in through the browser without pressing Enter in the terminal. I leave the terminal and browser open while the program runs.
 
 Each post is saved with its link, caption and date when available. I download the image served by Instagram when available, and fall back to a JPEG screenshot if downloading fails. The delivered image may be resized by Instagram. For videos and reels, I save a cover image or visible frame; the video file itself is not downloaded. Carousel posts currently show one image.
@@ -81,7 +87,6 @@ I use the current `data.json` file for resuming. Previous Spanish-named exports 
 | `--retry-incomplete` | Retry posts with missing captions or dates. |
 | `--resume` | Continue from a saved `data.json`. |
 | `--no-screenshots` | Collect text data without capturing post images. |
-| `--manual-bio` | Select the profile biography with a click. |
 | `--output` | Choose the directory for new extraction runs. |
 
 ## Saved files
@@ -104,3 +109,17 @@ I keep extracted data, screenshots, virtual environments, generated HTML, and br
 ## Collection limits
 
 The scraper follows the profile grid, which may contain pinned posts, so the first 50 links are not guaranteed to be the 50 most recent posts. The dashboard can sort the dates that were recovered. Captions, dates, and relationship lists may be incomplete, and suggested profiles can appear among relationship candidates. The configured limits are maximum targets rather than guaranteed totals.
+
+
+## Interaction counts
+
+Posts record `likes`, `comments`, and `shares` when Instagram reports them in post-specific JSON-LD, counter metadata, or supported visible counter controls. Missing or hidden counts stay `null`, not zero. Abbreviated counts such as 1.2K are approximate; JSON stores per-field sources and approximation flags. The dashboard marks rounded counts with ≈.
+
+`interactions` is the sum of these three counts only when all three are available. It is not Instagram Insights total interactions and excludes saves and other actions. `interactions_observed` is a partial sum when some counters are unavailable. CSV exports include counts, totals, an approximation flag and the check time. Shares cannot be inferred from a share button or from the number of comments loaded. The scraper does not click engagement buttons or access private Insights.
+
+Saved posts without a counter check are revisited on resume. Use `--posts-only --refresh-interactions --resume PATH_TO_DATA_JSON` to refresh counts without repeating relationship lists. The counters can change over time. A live run is needed to populate them; rebuilding the dashboard alone cannot recover missing values.
+
+
+## Automatic extraction
+
+Biography, posts, images and available counters are read automatically. There is no manual biography selection. The browser reuses the saved Instagram session. If it expires or Instagram requests verification, I complete authentication in the browser; the scraper cannot bypass that requirement. Unavailable biography text or counters remain missing instead of prompting for manual selection.

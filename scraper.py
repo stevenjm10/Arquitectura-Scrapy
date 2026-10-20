@@ -39,44 +39,6 @@ def open_page(page, url):
     page.locator('main, article, header').first.wait_for(state='visible')
     check_access(page)
 
-def select_text(page, name):
-    print(f'In the browser, click exactly on {name}. You have 90 seconds.')
-    page.evaluate('''() => {
-
-        window.__selectedText = null;
-
-        if (window.__textSelector) document.removeEventListener('click', window.__textSelector, true);
-
-        window.__textSelector = e => {
-
-            e.preventDefault(); e.stopPropagation();
-
-            window.__selectedText = e.target.innerText || e.target.textContent || '';
-
-            document.removeEventListener('click', window.__textSelector, true);
-
-        };
-
-        document.addEventListener('click', window.__textSelector, true);
-
-    }''')
-    try:
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            selected = page.evaluate("() => window.__selectedText")
-            if selected is not None:
-                return selected.strip()
-            page.wait_for_timeout(250)
-        raise TimeoutError(
-            "The biography was not selected within 90 seconds. "
-            "Run the program again and click the biography text."
-        )
-    finally:
-        if not page.is_closed():
-            page.evaluate("""() => {
-                document.removeEventListener('click', window.__textSelector, true);
-            }""")
-
 def relationship_link(page, username, kind):
     pattern = re.compile(r"\b(seguidores|followers)\b" if kind == 'followers'
                         else r"\b(seguidos|following)\b", re.I)
@@ -132,7 +94,7 @@ def wait_for_session(page, context, timeout=180):
         page.wait_for_timeout(1000)
     raise TimeoutError('No active session was detected before the timeout.')
 
-def profile(page, username, manual_bio=False):
+def profile(page, username):
     open_page(page, f'https://www.instagram.com/{username}/')
     page.locator('header').filter(has_text=re.compile(r'seguidores|followers', re.I)).first.wait_for(state='visible')
     if username_from_url(page.url) is None or username_from_url(page.url).lower() != username.lower():
@@ -141,7 +103,7 @@ def profile(page, username, manual_bio=False):
     header = page.locator('header').filter(has_text=re.compile(r'seguidores|followers', re.I))
     data = {'username': username, 'url': page.url,
              'visible_header': get_text(header), 'bio': None,
-             'bio_method': 'assisted HTML element selection'}
+             'bio_method': 'automatic_metadata'}
     for field, path in [('followers_visible', 'followers'), ('following_visible', 'following')]:
         link = relationship_link(page, username, path)
         data[field] = get_text(link)
@@ -150,12 +112,7 @@ def profile(page, username, manual_bio=False):
         exact = next((t for t in titles if re.fullmatch(r'[0-9]+(?:[., \u00a0][0-9]{3})*', t)), None)
         data[field.replace('_visible', '_total')] = (
             int(re.sub(r'\D', '', exact)) if exact else None)
-    if manual_bio:
-        data['bio'] = select_text(page, 'the profile biography text')
-        data['bio_method'] = 'manual_selection_unconfirmed'
-        data['bio_status'] = 'selected_by_user'
-    else:
-        data.update(extract_bio(page))
+    data.update(extract_bio(page))
     return data
 
 def collect_post_links(page, limit, checkpoint=None):
@@ -235,7 +192,90 @@ def structured_post(page, url):
         except (ValueError, TypeError):
             continue
     return next((item for item in matches if item.get('articleBody') or item.get('caption')
-                 or item.get('description')), {})
+                 or item.get('description') or item.get('interactionStatistic') or item.get('commentCount') is not None), {})
+
+
+COUNT_PATTERN = r'\d+(?:[.,\s\u00a0\u202f]\d+)*(?:\s*(?:mil|[kKmM]))?'
+METRIC_LABELS = {'likes': r'likes?|me gusta', 'comments': r'comments?|comentarios?',
+                 'shares': r'shares?|compartidos?|veces compartid[oa]'}
+
+
+def parse_count(value):
+    """Return a count and an approximation flag; ambiguous values stay missing."""
+    if isinstance(value, bool) or value is None:
+        return None
+    text = str(value).strip().lower()
+    suffix = re.fullmatch(r'(\d+(?:[.,]\d{1,2})?)\s*(mil|k|m)', text)
+    if suffix:
+        return int(float(suffix[1].replace(',', '.')) * (1000000 if suffix[2] == 'm' else 1000)), True
+    if re.fullmatch(r'\d+|\d{1,3}(?:[.,\s\u00a0\u202f]\d{3})+', text):
+        return int(re.sub(r'\D', '', text)), False
+    return None
+
+
+def labeled_counts(text):
+    """Accept whole counter labels, not numbers embedded in captions."""
+    result = {}
+    for field, label in METRIC_LABELS.items():
+        match = re.fullmatch(r'(?:view all|ver los|ver todos los|ver todos)?\s*('
+                             + COUNT_PATTERN + r')\s+(?:' + label + r')', text.strip(), re.I)
+        if not match:
+            match = re.fullmatch(r'(?:' + label + r')\s*:?\s*('
+                                 + COUNT_PATTERN + r')', text.strip(), re.I)
+        if match and (parsed := parse_count(match[1])) is not None:
+            result[field] = parsed
+    return result
+
+
+def extract_interactions(page, structured, username):
+    """Read reported counters without treating unavailable counts as zero."""
+    values = {key: None for key in METRIC_LABELS}
+    sources, approximations = {}, {}
+    def accept(field, parsed, source):
+        if parsed is not None and values[field] is None:
+            values[field], approximations[field] = parsed
+            sources[field] = source
+    statistics = structured.get('interactionStatistic', [])
+    if isinstance(statistics, dict):
+        statistics = [statistics]
+    for item in statistics if isinstance(statistics, list) else []:
+        if not isinstance(item, dict):
+            continue
+        action = item.get('interactionType', '')
+        if isinstance(action, dict):
+            action = action.get('@type') or action.get('@id') or ''
+        action = str(action).rstrip('/').split('/')[-1].split('#')[-1]
+        field = {'LikeAction': 'likes', 'CommentAction': 'comments', 'ShareAction': 'shares'}.get(action)
+        if field:
+            accept(field, parse_count(item.get('userInteractionCount')), 'post JSON-LD')
+    accept('comments', parse_count(structured.get('commentCount')), 'post JSON-LD')
+    for selector in ('meta[property="og:description"]', 'meta[name="description"]'):
+        meta = page.locator(selector).first
+        content = (meta.get_attribute('content') or '') if meta.count() else ''
+        prefix = re.split(r'\s+[-–—]\s+', content, maxsplit=1)[0]
+        if prefix == content or not username or not re.search(
+                r'(?<![\w.])' + re.escape(username) + r'(?![\w.])', content[len(prefix):], re.I):
+            continue
+        for field, label in METRIC_LABELS.items():
+            match = re.search(r'(?:^|,\s+|;\s*)(' + COUNT_PATTERN + r')\s+(?:'
+                              + label + r')(?=,\s+|;\s*|$)', prefix, re.I)
+            if match:
+                accept(field, parse_count(match[1]), selector)
+    # Restrict DOM fallback to post-counter links and action sections.
+    labels = page.locator('article a[href*="/liked_by/"], main a[href*="/liked_by/"], '
+                          'article section button, article section [role="button"]').evaluate_all(
+        '''els => els.filter(e => e.getClientRects().length).flatMap(e =>
+            [e.getAttribute('aria-label') || '', e.innerText || ''])''')
+    for label in labels:
+        for field, parsed in labeled_counts(label).items():
+            accept(field, parsed, 'visible post counter')
+    known = [value for value in values.values() if value is not None]
+    values.update(interactions=sum(known) if len(known) == 3 else None,
+                  interactions_observed=sum(known) if known else None,
+                  interactions_approximate=any(approximations.values()),
+                  interaction_sources=sources, interaction_approximations=approximations,
+                  interactions_checked_utc=datetime.now(timezone.utc).isoformat())
+    return values
 
 
 def download_post_image(page, url, output):
@@ -354,6 +394,7 @@ def extract_post(page, url, username=None, output=None):
                     continue
                 extracted_date = value
                 break
+    interactions = extract_interactions(page, structured, username)
     screenshot = None
     media_kind = None
     if output is not None:
@@ -368,7 +409,7 @@ def extract_post(page, url, username=None, output=None):
         except Exception as exc:
             check_access(page)
             print(f'Could not capture {url}: {exc}')
-    return {'url': url, 'caption': caption, 'date': extracted_date, 'screenshot': screenshot, 'media_kind': media_kind,
+    return {**interactions, 'url': url, 'caption': caption, 'date': extracted_date, 'screenshot': screenshot, 'media_kind': media_kind,
             'status': 'extracted_check_truncation' if caption else 'caption_not_detected',
             'method': method + '; date from DOM time or publication metadata'}
 
@@ -439,13 +480,13 @@ def save_results(data, output):
     temporary = output / 'data.tmp'
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     temporary.replace(output / 'data.json')
-    tables = [('posts', ['url', 'caption', 'date', 'screenshot', 'media_kind', 'status', 'method']),
+    tables = [('posts', ['url', 'caption', 'date', 'screenshot', 'media_kind', 'likes', 'comments', 'shares', 'interactions', 'interactions_observed', 'interactions_approximate', 'interactions_checked_utc', 'status', 'method']),
               ('followers', ['username', 'url']), ('following', ['username', 'url'])]
     for name, fields in tables:
         with (output / f'{name}.csv').open('w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()
-            writer.writerows({k: safe_cell(v) for k, v in row.items()} for row in data[name])
+            writer.writerows({k: safe_cell(row.get(k)) for k in fields} for row in data[name])
 
 def finalize_run(context, data, output):
     """Save results and build the dashboard even if the driver disconnects during cleanup."""
@@ -478,7 +519,7 @@ def main():
     parser.add_argument('--posts-only', '--skip-relationships', action='store_true', dest='skip_relationships')
     parser.add_argument('--relationships-only', dest='relationships_only', action='store_true', help='Skip posts; combine with --resume to preserve existing posts.')
     parser.add_argument('--retry-incomplete', action='store_true', help='On resume, retry posts with a missing caption or date.')
-    parser.add_argument('--manual-bio', action='store_true', help='Select the biography with one click.')
+    parser.add_argument('--refresh-interactions', action='store_true', help='Revisit saved posts to refresh available interaction counts.')
     parser.add_argument('--no-screenshots', action='store_true', help='Skip post screenshots.')
     parser.add_argument('--limit', type=int, default=50)
     parser.add_argument('--relationship-limit', type=int, default=100,
@@ -520,7 +561,7 @@ def main():
             page.goto('https://www.instagram.com/', wait_until='domcontentloaded')
             wait_for_session(page, context)
             check_access(page)
-            data['profile'] = profile(page, username, args.manual_bio)
+            data['profile'] = profile(page, username)
             save_results(data, output)
             def checkpoint_links(urls):
                 data['pending_links'] = urls
@@ -538,7 +579,10 @@ def main():
                 previous_post = next((f for f in data['posts'] if f.get('url') == url), None)
                 has_screenshot = (previous_post and previous_post.get('screenshot') and
                                   (output / previous_post['screenshot']).is_file())
-                if previous_post and not should_retry(previous_post, args.retry_incomplete) and (args.no_screenshots or has_screenshot):
+                if (previous_post and previous_post.get('interactions_checked_utc')
+                        and not args.refresh_interactions
+                        and not should_retry(previous_post, args.retry_incomplete)
+                        and (args.no_screenshots or has_screenshot)):
                     continue
                 print(f'Post {i}/{len(links)}: {url}')
                 try:
