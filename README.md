@@ -102,7 +102,7 @@ media/
     POST_CODE.jpg
 ```
 
-The dashboard also reads current-format exports in the existing `resultados/` folder. The `media/` folder is needed when rebuilding the dashboard from saved data. Importing a raw `data.json` alone does not import separate image files; rebuilding with `dashboard.py` includes the available screenshots.
+The dashboard also reads current-format exports in the existing `resultados/` folder. The `media/` folder is needed when rebuilding the dashboard from saved data. Saved runs and their available images are included automatically when the dashboard is generated; there is no manual JSON import.
 
 I keep extracted data, screenshots, virtual environments, generated HTML, and browser sessions out of GitHub. New browser sessions use `.instagram_session/`; the existing `.sesion_instagram/` is reused when present. These session folders stay private because they can provide account access.
 
@@ -113,9 +113,9 @@ The scraper follows the profile grid, which may contain pinned posts, so the fir
 
 ## Interaction counts
 
-Posts record `likes`, `comments`, and `shares` when Instagram reports them in post-specific JSON-LD, counter metadata, or supported visible counter controls. Missing or hidden counts stay `null`, not zero. Abbreviated counts such as 1.2K are approximate; JSON stores per-field sources and approximation flags. The dashboard marks rounded counts with ≈.
+Posts record `likes`, `comments`, and `reposts` when Instagram reports them in post-specific JSON-LD, counter metadata, or supported visible counter controls. Missing or hidden counts stay `null`, not zero. Abbreviated counts such as 1.2K are approximate; JSON stores per-field sources and approximation flags. The dashboard marks rounded counts with ≈.
 
-`interactions` is the sum of these three counts only when all three are available. It is not Instagram Insights total interactions and excludes saves and other actions. `interactions_observed` is a partial sum when some counters are unavailable. CSV exports include counts, totals, an approximation flag and the check time. Shares cannot be inferred from a share button or from the number of comments loaded. The scraper does not click engagement buttons or access private Insights.
+`interactions` is the sum of these three counts only when all three are available in new records. It is not Instagram Insights total interactions and excludes saves and other actions. `interactions_observed` is a partial sum when some counters are unavailable. CSV exports include counts, totals, an approximation flag and the check time. The scraper does not click engagement buttons or access private Insights.
 
 Saved posts without a counter check are revisited on resume. Use `--posts-only --refresh-interactions --resume PATH_TO_DATA_JSON` to refresh counts without repeating relationship lists. The counters can change over time. A live run is needed to populate them; rebuilding the dashboard alone cannot recover missing values.
 
@@ -123,3 +123,14 @@ Saved posts without a counter check are revisited on resume. Use `--posts-only -
 ## Automatic extraction
 
 Biography, posts, images and available counters are read automatically. There is no manual biography selection. The browser reuses the saved Instagram session. If it expires or Instagram requests verification, I complete authentication in the browser; the scraper cannot bypass that requirement. Unavailable biography text or counters remain missing instead of prompting for manual selection.
+
+
+## Comment text and reposts
+
+`--comments-limit` sets a collection target per post (default 25, from 0 to 200). Zero disables comment text collection. The scraper keeps any extra comments already loaded, so this is a target rather than a strict cap. It saves comment text, author, date and link in each post's `comments_list` and in `comments.csv`. Loaded comments are not guaranteed to be complete or exclusively top-level replies, and the reported comment counter remains separate from the number collected. Failed or skipped collection preserves previously saved comment text.
+
+The current version also reads repost counters when a supported label is present. New post interaction sums include likes, comments and reposts; a full sum requires all three counters. The dashboard calculates this sum from those same counters for older records as well, excluding shares. Missing counters are never replaced with zero.
+
+Collection loops share one bounded collector with per-operation scrolling and parsing. Optional media/comment failures use a common handler; restriction checks still stop the run. This keeps the two-script application and the existing resume and export options.
+
+Saved comment text is displayed in an expandable section on each dashboard post, with its author, date and link when available. The saved comment count is separate from Instagram's reported total.
