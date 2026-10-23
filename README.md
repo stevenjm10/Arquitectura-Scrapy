@@ -2,10 +2,11 @@
 
 I use this project to collect Instagram profile information and view it in a local dashboard. The scraper runs with Python and Playwright, and the dashboard shows publications, screenshots, followers, and following accounts.
 
-The project has two application files:
+The project has three application files:
 
 - `scraper.py`: collects the data, captures visible post media, and saves the results.
 - `dashboard.py`: contains the dashboard layout and generates `dashboard.html`.
+- `gemini_server.py`: serves the local pages and keeps Gemini API calls behind a local Python endpoint.
 
 The source code and commands are in English. The dashboard interface is in Spanish.
 
@@ -43,7 +44,7 @@ The gallery shows large image previews, captions, an image download button, and 
 
 ## Opening the dashboard
 
-The scraper generates `dashboard.html` automatically. I open it with:
+The scraper generates `dashboard.html` automatically. For the offline dashboard, I open it with:
 
 ```powershell
 Start-Process .\dashboard.html
@@ -52,12 +53,23 @@ Start-Process .\dashboard.html
 To rebuild it from existing results:
 
 ```powershell
-py dashboard.py
+python dashboard.py
 ```
 
-The dashboard includes profile information, screenshot cards, search, sorting, pagination, and separate follower and following lists. I reload the page after rebuilding it.
+The dashboard includes profile information, screenshot cards, search, sorting, pagination, and separate follower and following lists. It embeds the separate `bigfive.html` report for the exploratory text analysis, and provides a link to open it on its own. Rebuild both pages with `python dashboard.py`, then reload them.
 
-Screenshots are embedded in the generated HTML, so it can be opened without a server or internet connection. Sharing that HTML also shares its data and screenshots.
+To enable the optional Gemini analysis, I set a replacement key in PowerShell and run the local server:
+
+The key visible in the shared screenshot is exposed. I revoke it in Google AI Studio and create a new key; I never reuse or paste an API key into HTML or source code.
+
+```powershell
+$env:GEMINI_API_KEY = "PASTE_YOUR_NEW_KEY_HERE"
+python gemini_server.py
+```
+
+Then I open `http://127.0.0.1:8765/dashboard.html` in the browser. The server listens only on this computer; I leave that terminal running while I use the dashboard and press Ctrl+C to stop it. The report sends captions to Google Gemini only after I press **Analizar captions con Gemini**. The key stays in the server environment and is never written into the HTML. The Gemini analysis needs an internet connection; the lexical word counts still work offline.
+
+Screenshots are embedded in the generated HTML, so the offline view can be opened without a server or internet connection. Sharing generated HTML also shares its captions and screenshots.
 
 ## Continuing a saved run
 
@@ -134,3 +146,7 @@ The current version also reads repost counters when a supported label is present
 Collection loops share one bounded collector with per-operation scrolling and parsing. Optional media/comment failures use a common handler; restriction checks still stop the run. This keeps the two-script application and the existing resume and export options.
 
 Saved comment text is displayed in an expandable section on each dashboard post, with its author, date and link when available. The saved comment count is separate from Instagram's reported total.
+
+## Big Five exploratorio
+
+`bigfive.html` muestra coincidencias léxicas orientativas y, opcionalmente, un análisis cualitativo con Gemini. El análisis de Gemini revisa solo los captions, exige al menos tres captions y 50 palabras, y solo se ejecuta tras pulsar el botón. Es una exploración del texto, no un test validado ni una evaluación psicológica o laboral, y no debe usarse para tomar decisiones sobre una persona. La página se regenera junto con `dashboard.html` al ejecutar `python dashboard.py`.
