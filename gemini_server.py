@@ -62,7 +62,6 @@ def analyze_with_gemini(captions):
     body = {
         "contents": [{"parts": [{"text": instruction}]}],
         "generationConfig": {
-            "temperature": 0.2,
             "maxOutputTokens": 1800,
             "responseFormat": {
                 "text": {"mimeType": "APPLICATION_JSON", "schema": schema},
