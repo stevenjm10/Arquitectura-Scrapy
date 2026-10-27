@@ -27,13 +27,13 @@ If the environment already works, I skip creating it again.
 To collect up to 50 posts, 100 followers, and 100 following accounts:
 
 ```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username josedeodo --limit 50 --relationship-limit 100
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --relationship-limit 100
 ```
 
 For a smaller extraction of 25 posts, I use:
 
 ```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username josedeodo --limit 25 --relationship-limit 100
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 25 --relationship-limit 100
 ```
 
 The browser opens and waits for my Instagram session. If needed, I sign in through the browser without pressing Enter in the terminal. I leave the terminal and browser open while the program runs.
@@ -56,7 +56,7 @@ To rebuild it from existing results:
 python dashboard.py
 ```
 
-The main dashboard is the home and data explorer: profile information, screenshots, search, sorting, pagination, and follower/following lists. The Benford report (`benford.html`) and exploratory Big Five report (`bigfive.html`) are separate pages and only load when opened from the dashboard. Rebuild all three pages with `python dashboard.py`, then reload them.
+The dashboard includes profile information, screenshot cards, search, sorting, pagination, and separate follower and following lists. It embeds the separate `bigfive.html` report for the exploratory text analysis, and provides a link to open it on its own. Rebuild both pages with `python dashboard.py`, then reload them.
 
 To enable the optional Gemini analysis, I set a replacement key in PowerShell and run the local server:
 
@@ -67,19 +67,25 @@ $env:GEMINI_API_KEY = "PASTE_YOUR_NEW_KEY_HERE"
 python gemini_server.py
 ```
 
-Then I open `http://127.0.0.1:8765/dashboard.html` in the browser. The server listens only on this computer; I leave that terminal running while I use the dashboard and press Ctrl+C to stop it. The Big Five report sends captions to Google Gemini only after I press **Analizar captions con Gemini**. The key stays in the server environment and is never written into the HTML. The Gemini analysis needs an internet connection; the lexical word counts still work offline.
+Then I open `http://127.0.0.1:8765/dashboard.html` in the browser. The server listens only on this computer; I leave that terminal running while I use the dashboard and press Ctrl+C to stop it. The report sends captions to Google Gemini only after I press **Analizar captions con Gemini**. The key stays in the server environment and is never written into the HTML. The Gemini analysis needs an internet connection; the lexical word counts still work offline.
 
-Screenshots are embedded in the main dashboard HTML, so the offline view can be opened without a server or internet connection. Benford and Big Five are generated as separate report pages alongside it. Sharing generated HTML also shares its captions and screenshots.
+Screenshots are embedded in the generated HTML, so the offline view can be opened without a server or internet connection. Sharing generated HTML also shares its captions and screenshots.
 
 ## Continuing a saved run
 
 To continue an extraction and capture posts that do not have screenshots yet:
 
 ```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username josedeodo --limit 50 --posts-only --resume results\RUN_FOLDER\data.json
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --posts-only --resume results\RUN_FOLDER\data.json
 ```
 
-For a saved run, replace `RUN_FOLDER` with a run folder that belongs to the same Instagram username. A run for a different account cannot be resumed. The existing ElRubius exports remain separate in the results folders.
+For the existing local extraction in this project, I use:
+
+```powershell
+.\.venv_nuevo\Scripts\python.exe scraper.py --username elrubiuswtf --limit 50 --posts-only --resume resultados\20261015_235333_249974\data.json
+```
+
+I use the current `data.json` file for resuming. Previous Spanish-named exports remain on disk, but the simplified application reads the current English field names. Existing local runs were converted before removing the compatibility module.
 
 ## Useful options
 
@@ -90,23 +96,10 @@ For a saved run, replace `RUN_FOLDER` with a run folder that belongs to the same
 | `--relationship-limit` | Limit per follower/following list, from 1 to 100. |
 | `--posts-only` | Collect posts without repeating relationship lists. |
 | `--relationships-only` | Collect relationship lists without opening posts. |
-| `--benford` | Collect up to 250 follower profiles and their public follower/following counts for a Benford comparison; needs at least 200 complete profiles. |
 | `--retry-incomplete` | Retry posts with missing captions or dates. |
 | `--resume` | Continue from a saved `data.json`. |
 | `--no-screenshots` | Collect text data without capturing post images. |
 | `--output` | Choose the directory for new extraction runs. |
-
-## Benford analysis of followers
-
-For Josedeodo, from PowerShell in this project folder, run:
-
-```powershell
-.\.venv_nuevo\Scripts\python.exe scraper.py --username josedeodo --benford
-```
-
-The scraper collects posts and up to 250 follower usernames, then visits each public profile to read its follower and following counters. Collecting posts is needed for Big Five captions. It saves progress after every profile in `followers.csv` and `data.json`. Instagram may round counters (marked `≈`) or limit access, so the report only calculates Benford statistics when at least 200 profiles have usable counts. Use `--relationships-only` only when you do not need post captions for Big Five. Open the dashboard generated by the run to see the profile table, first-digit counts, and observed curves against Benford's theoretical curve.
-
-The mean absolute deviation (MAD) summarizes how closely the sample follows Benford; its labels describe statistical fit only. Deviations cannot identify bots or estimate what share are bots. Profile counters are rounded and the follower list may be incomplete, so treat this as an exploratory signal for further review.
 
 ## Saved files
 
@@ -156,4 +149,4 @@ Saved comment text is displayed in an expandable section on each dashboard post,
 
 ## Big Five exploratorio
 
-`benford.html` contiene el análisis de primeros dígitos y su tabla independiente; `bigfive.html` muestra coincidencias léxicas orientativas y, opcionalmente, un análisis cualitativo con Gemini. El análisis de Gemini revisa solo los captions, exige al menos tres captions y 50 palabras, y solo se ejecuta tras pulsar el botón. Es una exploración del texto, no un test validado ni una evaluación psicológica o laboral, y no debe usarse para tomar decisiones sobre una persona. La página se regenera junto con `dashboard.html` al ejecutar `python dashboard.py`.
+`bigfive.html` muestra coincidencias léxicas orientativas y, opcionalmente, un análisis cualitativo con Gemini. El análisis de Gemini revisa solo los captions, exige al menos tres captions y 50 palabras, y solo se ejecuta tras pulsar el botón. Es una exploración del texto, no un test validado ni una evaluación psicológica o laboral, y no debe usarse para tomar decisiones sobre una persona. La página se regenera junto con `dashboard.html` al ejecutar `python dashboard.py`.
