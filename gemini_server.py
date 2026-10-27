@@ -62,6 +62,7 @@ def analyze_with_gemini(captions):
     body = {
         "contents": [{"parts": [{"text": instruction}]}],
         "generationConfig": {
+            "temperature": 0.2,
             "maxOutputTokens": 1800,
             "responseFormat": {
                 "text": {"mimeType": "APPLICATION_JSON", "schema": schema},
@@ -141,8 +142,7 @@ class Handler(BaseHTTPRequestHandler):
         route = urlsplit(self.path).path
         if route == "/":
             route = "/dashboard.html"
-        files = {"/dashboard.html": "dashboard.html", "/bigfive.html": "bigfive.html",
-                 "/benford.html": "benford.html"}
+        files = {"/dashboard.html": "dashboard.html", "/bigfive.html": "bigfive.html"}
         filename = files.get(route)
         if not filename:
             self.send_error(404)

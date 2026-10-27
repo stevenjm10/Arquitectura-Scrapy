@@ -20,8 +20,6 @@ META_DESC = ('meta[property="og:description"]', 'meta[name="description"]')
 RESERVED = {'accounts', 'explore', 'direct', 'reels', 'reel', 'p', 'stories',
             'about', 'legal', 'privacy', 'terms', 'challenge', 'settings'}
 FOLLOW = {'followers': r'\b(seguidores|followers)\b', 'following': r'\b(seguidos|following)\b'}
-BENFORD_MIN_SAMPLE = 200
-BENFORD_CANDIDATES = 250
 WARNINGS = ('try again later', 'inténtalo de nuevo más tarde', 'intentá de nuevo más tarde',
             'we restrict certain activity', 'restringimos cierta actividad')
 COUNT_PATTERN = r'\d+(?:[.,\s\u00a0\u202f]\d+)*(?:\s*(?:mil|[kKmM]))?'
@@ -34,9 +32,7 @@ FIELDS = {
               'comments_collected', 'comments_status', 'reposts', 'interactions',
               'interactions_observed', 'interactions_approximate', 'interactions_checked_utc',
               'status', 'method'],
-    'followers': ['username', 'url', 'followers_count', 'followers_count_approximate',
-                  'following_count', 'following_count_approximate', 'counts_status', 'counts_checked_utc'],
-    'following': ['username', 'url'],
+    'followers': ['username', 'url'], 'following': ['username', 'url'],
     'comments': ['post_url', 'username', 'text', 'date', 'url']}
 COMMENT_LOAD_MORE = ('button[aria-label*="more comments" i], button[aria-label*="más comentarios" i], '
                      '[role="button"][aria-label*="more comments" i], [role="button"][aria-label*="más comentarios" i], '
@@ -54,13 +50,8 @@ SCROLL_JS = r"""sel => {
     while (el) {
         if (el.clientHeight > 100 && el.scrollHeight > el.clientHeight + 10 &&
             /auto|scroll/.test(getComputedStyle(el).overflowY)) {
-            const before = el.scrollTop;
-            const next = Math.min(before + Math.max(300, el.clientHeight * 0.8),
-                                  el.scrollHeight - el.clientHeight);
-            if (next > before + 1) {
-                el.scrollTop = next;
-                return true;
-            }
+            el.scrollTop += Math.max(300, el.clientHeight * 0.8);
+            return true;
         }
         el = el.parentElement;
     }
@@ -198,59 +189,6 @@ def profile(page, username):
         data[f'{kind}_total'] = next((count[0] for title in titles
                                      if (count := parse_count(title)) and not count[1]), None)
     return {**data, **extract_bio(page)}
-
-def profile_count(profile_data, kind):
-    """Return an exact header count or a clearly marked estimate from its visible label."""
-    exact = profile_data.get(f'{kind}_total')
-    if isinstance(exact, int) and not isinstance(exact, bool):
-        return exact, False
-    label = profile_data.get(f'{kind}_visible') or ''
-    match = re.search(COUNT_PATTERN, label, re.I)
-    parsed = parse_count(match[0]) if match else None
-    return parsed if parsed is not None else (None, False)
-
-def enrich_benford_followers(page, followers, checkpoint, candidate_limit=BENFORD_CANDIDATES):
-    """Read public follower/following counts from each follower profile, saving progress."""
-    candidates = followers[:candidate_limit]
-    for index, row in enumerate(candidates, 1):
-        username = row.get('username')
-        if not username:
-            continue
-        first, second = row.get('followers_count'), row.get('following_count')
-        if (isinstance(first, int) and first > 0 and isinstance(second, int) and second > 0):
-            continue
-        print(f'Benford sample {index}/{len(candidates)}: @{username}')
-        try:
-            details = profile(page, username)
-            followers_count, followers_approx = profile_count(details, 'followers')
-            following_count, following_approx = profile_count(details, 'following')
-            row.update({
-                'followers_count': followers_count,
-                'followers_count_approximate': followers_approx,
-                'following_count': following_count,
-                'following_count_approximate': following_approx,
-                'counts_status': 'complete' if followers_count is not None and following_count is not None else 'partial',
-                'counts_checked_utc': datetime.now(timezone.utc).isoformat(),
-            })
-        except InstagramRestriction:
-            raise
-        except Exception as exc:
-            check_access(page)
-            row['counts_status'] = f'error: {type(exc).__name__}'
-            print(f'Could not read public counters for @{username}: {type(exc).__name__}')
-        checkpoint(list(followers), 'benford_counts_in_progress')
-        page.wait_for_timeout(1200)
-
-    complete = sum(
-        isinstance(row.get('followers_count'), int) and row['followers_count'] > 0
-        and isinstance(row.get('following_count'), int) and row['following_count'] > 0
-        for row in candidates
-    )
-    status = ('benford_sample_ready' if complete >= BENFORD_MIN_SAMPLE
-              else f'benford_sample_incomplete_{complete}_of_{BENFORD_MIN_SAMPLE}')
-    checkpoint(list(followers), status)
-    print(f'Benford sample: {complete}/{BENFORD_MIN_SAMPLE} profiles have both positive counters.')
-    return status
 
 def collect_items(page, read, move, limit, rounds, delay, checkpoint=None, stall_limit=5, cap=True):
     found, stalled = {}, 0
@@ -522,18 +460,10 @@ def extract_relationships(page, username, kind, checkpoint, limit=100):
         return {name.lower(): {'username': name, 'url': f'https://www.instagram.com/{name}/'}
                 for url in urls if (name := username_from_url(url)) and name.lower() != username.lower()}
     def move():
-        scroll(page, '[role="dialog"] a[href]')
-        links = dialog.locator('a[href]')
-        for index in range(links.count() - 1, -1, -1):
-            candidate = links.nth(index)
-            if candidate.is_visible():
-                candidate.hover()
-                page.mouse.wheel(0, 700)
-                return
-        dialog.hover()
-        page.mouse.wheel(0, 700)
-    rows, status = collect_items(page, read, move, limit, 500, 3500,
-                                 checkpoint, stall_limit=12)
+        if not scroll(page, '[role="dialog"] a[href]'):
+            dialog.hover()
+            page.mouse.wheel(0, 500)
+    rows, status = collect_items(page, read, move, limit, 500, 2200, checkpoint)
     if not rows:
         raise RuntimeError('No profile candidates detected; an empty list is not confirmed.')
     return rows, status
@@ -546,15 +476,7 @@ def save_results(data, output):
     output.mkdir(parents=True, exist_ok=True)
     temporary = output / 'data.tmp'
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    destination = output / 'data.json'
-    for attempt_index in range(5):
-        try:
-            temporary.replace(destination)
-            break
-        except PermissionError:
-            if attempt_index == 4:
-                raise
-            time.sleep(0.25 * (attempt_index + 1))
+    temporary.replace(output / 'data.json')
     rows = {'posts': data['posts'], 'followers': data['followers'], 'following': data['following'],
             'comments': [{'post_url': p['url'], **c} for p in data['posts'] for c in p.get('comments_list') or []]}
     for name, fields in FIELDS.items():
@@ -616,8 +538,6 @@ def main():
     ap.add_argument('--refresh-interactions', action='store_true',
                     help='Revisit saved posts to refresh counters and comments.')
     ap.add_argument('--no-screenshots', action='store_true', help='Skip post screenshots.')
-    ap.add_argument('--benford', action='store_true',
-                    help='Collect at least 200 follower profiles with public follower/following counts for a Benford report.')
     ap.add_argument('--limit', type=int, default=50, help='Posts to extract (1-50).')
     ap.add_argument('--relationship-limit', type=int, default=100, help='Records per relationship list (1-100).')
     ap.add_argument('--comments-limit', type=int, default=25,
@@ -628,16 +548,13 @@ def main():
             ap.error(f'--{flag.replace("_", "-")} must be between {low} and {high}.')
     if args.relationships_only and args.skip_relationships:
         ap.error('--relationships-only cannot be combined with --posts-only.')
-    if args.benford and args.skip_relationships:
-        ap.error('--benford requires collecting follower profiles; remove --posts-only.')
     username = args.username.lstrip('@')
     if not re.fullmatch(UNAME, username):
         ap.error('Invalid username.')
     output = args.output / datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     data = {'extracted_utc': datetime.now(timezone.utc).isoformat(), 'profile': {},
             'post_target': args.limit, 'relationship_limit': args.relationship_limit,
-            'comments_limit': args.comments_limit, 'benford_enabled': args.benford,
-            'benford_minimum': BENFORD_MIN_SAMPLE, 'posts': [], 'followers': [], 'following': [],
+            'comments_limit': args.comments_limit, 'posts': [], 'followers': [], 'following': [],
             'statuses': {}, 'errors': []}
     if args.resume:
         try:
@@ -648,9 +565,7 @@ def main():
                 if not isinstance(previous.get(field), list):
                     raise ValueError(f'Invalid field: {field}')
             data.update(previous, post_target=args.limit, relationship_limit=args.relationship_limit,
-                        comments_limit=args.comments_limit, benford_enabled=args.benford,
-                        benford_minimum=BENFORD_MIN_SAMPLE,
-                        resumed_utc=datetime.now(timezone.utc).isoformat())
+                        comments_limit=args.comments_limit, resumed_utc=datetime.now(timezone.utc).isoformat())
             output = args.resume.resolve().parent
         except (OSError, ValueError) as exc:
             ap.error(f'Cannot resume: {exc}')
@@ -666,26 +581,10 @@ def main():
             data['profile'] = profile(page, username)
             save_results(data, output)
 
-            saved_followers = {
-                (row.get('username') or '').lower(): row
-                for row in data.get('followers', []) if row.get('username')
-            }
-
             def checkpoint(field, rows, status=None):
-                if field == 'followers':
-                    merged = []
-                    for row in rows:
-                        previous = saved_followers.get((row.get('username') or '').lower(), {})
-                        merged_row = {**previous, **row}
-                        merged.append(merged_row)
-                        if merged_row.get('username'):
-                            saved_followers[merged_row['username'].lower()] = merged_row
-                    rows = merged
                 data[field] = rows
                 if status:
-                    status_field = ('benford' if field == 'followers' and status.startswith('benford_')
-                                    else field)
-                    data['statuses'][status_field] = status
+                    data['statuses'][field] = status
                 save_results(data, output)
 
             links = data.get('pending_links', [])
@@ -718,25 +617,15 @@ def main():
                     continue
 
                 try:
-                    relationship_limit = (max(args.relationship_limit, BENFORD_CANDIDATES)
-                                          if args.benford and kind == 'followers'
-                                          else args.relationship_limit)
                     rows, status = extract_relationships(page, username, kind,
                                                          lambda rows, status: checkpoint(kind, rows, status),
-                                                         relationship_limit)
+                                                         args.relationship_limit)
                 except InstagramRestriction:
                     raise
                 except Exception as exc:
                     check_access(page)
                     data['errors'].append(f'{kind}: {type(exc).__name__}: {exc}')
                     checkpoint(kind, data[kind], 'error; partial_result')
-                    continue
-                if kind == 'followers' and args.benford:
-                    rows = [{**saved_followers.get((row.get('username') or '').lower(), {}), **row}
-                            for row in rows]
-                    checkpoint(kind, rows, status)
-                    enrich_benford_followers(page, data[kind],
-                                              lambda updated, state: checkpoint('followers', updated, state))
                     continue
                 checkpoint(kind, rows, status)
         except (Exception, KeyboardInterrupt) as exc:
